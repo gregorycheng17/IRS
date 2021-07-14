@@ -93,12 +93,9 @@ RollTable['RollingPt']=RollTable['Implied_y']-RollTable['Implied_x'] #Far-Near
 RollTable['RollingBps']=RollTable['RollingPt']*10000
 
 ## ccy pair, valuetime, fixingdate, valuex, valuey, rollingpoint, rollingpip
-
-#Currency might be wrong, either its currency, curve, ForwardStartDateIndex
-#close time has some issues...
-RollTable=RollTable[['Ticker','Currency','CloseDate','ForwardStartDate_x','ForwardStartDate_y','RemainDays','Maturity'
+RollTable=RollTable[['Ticker','CloseDate','ForwardStartDate_x','ForwardStartDate_y','RemainDays','Maturity'
                      ,'Implied_x','Implied_y','RollingBps']] #Only useful Columns
-RollTable.columns=['Ticker','CloseTime','ValueDate','FSDate1','FSDate2','LD_to_Roll','Maturity'
+RollTable.columns=['Ticker','ValueDate','FSDate1','FSDate2','LD_to_Roll','Maturity'
                      ,'Value1','Value2','RollingBps'] #Rename the colns
 #ValueDate should be renamed to SpotDate
 
@@ -117,7 +114,6 @@ IRSRate=lastValueday['Value1'] #of each pair, every fix, found the closest outri
 bmk_VD=RollTable[RollTable['LD_to_Roll']<=benchmark].groupby(['Ticker','FSDate1'],as_index=True).first()
 bmk_VD = bmk_VD.set_index('ValueDate', append=True)
 bmk_IRSRate=bmk_VD['Value1'] #of each pair, on each IMM, found the rate at fix-benchmark
-##
 #Merge DFs
 #Rename
 #Set index
@@ -125,24 +121,21 @@ result = pd.merge(DailyPnL.reset_index(), IRSRate.reset_index(),on=['Ticker','FS
                   how='left')        #Merge orig table with last date so to computer PnL in USD notional.
 
 ##
-result.columns=['Ticker','FSDate1','ValueDate','CloseTime','FSDate2','LD_to_Roll',
+result.columns=['Ticker','FSDate1','ValueDate','FSDate2','LD_to_Roll',
                 'Maturity','Value1','Value2','RollingBps','roll_pt_diff','BmkD1','Last_Valid_Date',
                 'Last_Valid_IRSRate'] #Rename the colns
 #Plus benchmark colns
 bmk_result = pd.merge(result, bmk_IRSRate.reset_index(),on=['Ticker','FSDate1'],
                   how='left')        #Merge orig table with last date so to computer PnL in USD notional.
-bmk_result.columns=['Ticker','FSDate1','ValueDate','CloseTime','FSDate2','LD_to_Roll',
+bmk_result.columns=['Ticker','FSDate1','ValueDate','FSDate2','LD_to_Roll',
                 'Maturity','Value1','Value2','RollingBps','roll_pt_diff','BmkD1','Last_Valid_Date',
                 'Last_Valid_IRSRate',
                    'LastBmk_Valid_Date','LastBmk_Valid_IRSRate'] #Rename the colns
 bmk_result.set_index(['Ticker','FSDate1','ValueDate'],inplace=True)
-##
-
 #After combined, we have colns of last available dates and rates and colns of benchmark date and rates
 #If benchamark date is not available yet, filled with last available dates and rates.
 bmk_result.LastBmk_Valid_Date.fillna(bmk_result.Last_Valid_Date, inplace=True)
 bmk_result.LastBmk_Valid_IRSRate.fillna(bmk_result.Last_Valid_IRSRate, inplace=True)
-##
 #add cols_
 bmk_result['PnL_return']=bmk_result['roll_pt_diff']#/bmk_result['Value1']               #PnL not yet PV!!!
 #bmk_result['lastBmk_valid_PnL']=bmk_result['roll_pt_diff']/bmk_result['LastBmk_Valid_FXRate']               #PnL not yet PV!!!
@@ -159,37 +152,124 @@ metaIRSPos.set_index('VD',inplace=True)    #Date as index
 metaIRSPos=metaIRSPos.unstack()
 metaIRSPos.index.names = ['Ticker','ValueDate'] #Prepare to merge
 metaIRSPosd=metaIRSPos.reset_index()
-metaIRSPosd['Ticker']=metaIRSPosd['Ticker'].str[4:]
+#change order of the name to match another file's name
+metadelimit=metaIRSPosd.Ticker.str.split('-',expand=True)
+metaIRSPosd.Ticker=metadelimit[1]+'_'+metadelimit[3]+'_'+metadelimit[2]
 
-#Almost finish...need to 2y-3M in meta vs 3M_2Y in bmk....
 
 ##Merge DFs
 finalresult = pd.merge(bmk_result.reset_index(), metaIRSPosd,on=['Ticker','ValueDate'],
                   how='left')
 #Rename
 finalresult=finalresult.rename(columns = {0:'Pos'})
-##
 
 #PnL using the available day
 finalresult['Pos_D_PnL']=finalresult['Pos']*finalresult['PnL_return']
 #Cumsum in reverse using [::-1], -1 step each time for whole series
-finalresult['Pos_PnL'] = finalresult.groupby(['Ticker','FixD1'])['Pos_D_PnL'].apply(lambda x: x[::-1].cumsum()[::-1])
+finalresult['Pos_PnL'] = finalresult.groupby(['Ticker','FSDate1'])['Pos_D_PnL'].apply(lambda x: x[::-1].cumsum()[::-1])
 
 #Create a df to store all cum PnL in Benchmark date.
-selected_rows=(finalresult["ValueTime"]==finalresult["LastBmk_Valid_Date"])
-selected_columns=['NDF_Pair','FixD1','Pos_PnL']
+selected_rows=(finalresult["ValueDate"]==finalresult["LastBmk_Valid_Date"])
+selected_columns=['Ticker','FSDate1','Pos_PnL']
 benchmark_PnL=finalresult.loc[selected_rows,selected_columns]
+##
 
 #Merge DFs
 #Rename
-#Set index
-final_bmk_result = pd.merge(finalresult, benchmark_PnL,on=['NDF_Pair','FixD1'],
+final_bmk_result = pd.merge(finalresult, benchmark_PnL,on=['Ticker','FSDate1'],
                   how='left')        #Merge orig table with last date so to computer PnL in USD notional.
-final_bmk_result.columns=['NDF_Pair','FixD1','ValueTime','IMM1_Fwd','IMM2_Fwd','Fwd_Fwd_pt',
-                'Fwd_Fwd_pip','LD_to_Roll','roll_pt_diff','Bmk_D1','Last_Valid_Date','Last_Valid_FXRate',
-                   'LastBmk_Valid_Date','LastBmk_Valid_FXRate','PnL_return','Pos','Pos_D_PnL','Pos_PnL',
-                   'Bmk_PnL']       #Rename the colns
-#final_bmk_result.set_index(['NDF_Pair','FixD1','ValueTime'],inplace=True)
-final_bmk_result['Cum_Bmk_PnL']=final_bmk_result['Pos_PnL']-final_bmk_result['Bmk_PnL']
+final_bmk_result.rename(columns={'Pos_PnL_x':'Cum_Pos_PnL', 'Pos_PnL_y':'Bmk_PnL'},inplace=True)
+final_bmk_result['Cum_Bmk_PnL']=final_bmk_result['Cum_Pos_PnL']-final_bmk_result['Bmk_PnL']
+## Not yet
+##
 
+# Graph1: to plot the rolling graphs
+Graph1 = RollTable[['NDF_Pair', 'ValueTime', 'Fwd_Fwd_pip']].dropna()
+# Testmode
+# Graph1=Graph1[(Graph1['NDF_Pair']=='USDPHP')]
 
+Graph1storage = {}  # to store
+timer_start = time.time()
+
+# counter - to change color
+num = 0
+
+for key, value in Graph1.groupby(
+        ['NDF_Pair']):  # seperate dataframes by column value using group by, the col being groupby becomes key
+
+    Graph1storage[key] = value  # store dataframes in dict
+
+    # Linegraph
+    # Data
+    x = value['ValueTime'].values
+    y = value['Fwd_Fwd_pip'].values
+
+    # Reset setting everytime
+    mpl.rcParams.update(mpl.rcParamsDefault)
+    # create a color palette
+    palette = plt.get_cmap('Set1')
+
+    sns.set()  # seaborn style
+    fig, ax = plt.subplots(figsize=(20, 10))  # size of the plot
+    ax.plot(x, y, marker='', color=palette(num), linewidth=1.9, alpha=0.9)  # Plot the lineplot
+
+    # format the ticks
+    # x-axis
+    ax.xaxis.set_major_locator(years)  # major tick
+    ax.xaxis.set_major_formatter(yearsFmt)
+    ax.tick_params(which='major', length=3, color='k', direction='in', top="off",
+                   pad=15)  # pad is distance between tick and label
+
+    ax.xaxis.set_minor_locator(months)  # minor tick
+    ax.xaxis.set_minor_formatter(monthsFmt)
+    ax.tick_params(which='minor', length=3, color='k', direction='out', top="off")
+
+    # y-axis
+    ax.yaxis.set_minor_locator(plt.MaxNLocator(20))
+    ax.yaxis.set_major_locator(plt.MaxNLocator(10))
+
+    # format the ticks
+    # y-axis
+    ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: format(int(x), ',')))
+
+    # gridlines
+    ax.grid(which='major', color='black', linestyle='--', linewidth=1, alpha=0.5)
+    ax.grid(which='minor', color='black', linestyle='--', linewidth=0.5, alpha=0.3)
+
+    # Tick min and max
+    datemin = np.datetime64(x.min(), 'Y')
+    datemax = np.datetime64(x.max(), 'Y') + np.timedelta64(1, 'Y')  # round to nearest years...
+    ax.set_xlim(datemin, datemax)
+    plt.ylim(y.min() - abs(y.min()) / 20, y.max() + abs(y.max() / 20))
+
+    # Add axis names
+    plt.xlabel('Date')
+    plt.ylabel('IMM Pip Spread')
+
+    # Get Max and Min value and get in titles
+    xmax = x[np.argmax(y)]
+    ymax = y.max()
+    xmin = x[np.argmin(y)]
+    ymin = y.min()
+
+    xmax = pd.to_datetime(str(xmax)).strftime('%Y.%m.%d')
+    xmin = pd.to_datetime(str(xmin)).strftime('%Y.%m.%d')
+
+    # Timer on process
+    timer_end = time.time()
+    speed = int(timer_end - timer_start)
+
+    # Add Title and subtitle
+    plt.title("Rolling Spread  of {0} between 1st and 2nd IMM across time".format(key)
+              + "\nThe report took {0} seconds to be generated.".format(speed)
+              + "\nMax: {:1,.0f} pips on {}".format(ymax, xmax)
+              + "\nMin: {:1,.0f} pips on {}".format(ymin, xmin)
+              , loc='left', fontsize=12, fontweight=0, color='green', fontstyle='italic')  # Add title to the plot
+    plt.suptitle(key, fontsize=18)
+
+    plt.savefig(my_path + '/output/RollingPoint/' + key + '.png')
+    plt.clf()  # to clean the memory
+    plt.cla()
+    plt.close()
+
+    num = num + 10  # counter to change color

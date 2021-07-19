@@ -25,6 +25,11 @@ directory_in_str = r"D:\Users\Gregory\GitHub\IRS\meta"
 directory_out_str = r"D:\Users\Gregory\GitHub\IRS\output"
 Pos_dir=r"D:\Users\Gregory\GitHub\IRS\input"
 
+#D:\Users\Gregory\GitHub\IRS\output\RollAnalysis
+my_path=os.path.join("D:\\Users\Gregory\GitHub\IRS\output\RollAnalysis"+ os.sep) # Change directory
+#output_path=os.path.join(my_path, "Health_Check"+ os.sep) # Report Directory
+#Backup_path=os.path.join(output_path, "Archive"+ os.sep)# Backup Directory
+
 
 #customisation
 benchmark=14 #14 days from fix
@@ -180,13 +185,12 @@ final_bmk_result = pd.merge(finalresult, benchmark_PnL,on=['Ticker','FSDate1'],
                   how='left')        #Merge orig table with last date so to computer PnL in USD notional.
 final_bmk_result.rename(columns={'Pos_PnL_x':'Cum_Pos_PnL', 'Pos_PnL_y':'Bmk_PnL'},inplace=True)
 final_bmk_result['Cum_Bmk_PnL']=final_bmk_result['Cum_Pos_PnL']-final_bmk_result['Bmk_PnL']
-## Not yet
 ##
 
 # Graph1: to plot the rolling graphs
-Graph1 = RollTable[['NDF_Pair', 'ValueTime', 'Fwd_Fwd_pip']].dropna()
+Graph1 = RollTable[['Ticker', 'ValueDate', 'RollingBps']].dropna()
 # Testmode
-# Graph1=Graph1[(Graph1['NDF_Pair']=='USDPHP')]
+# Graph1=Graph1[(Graph1['Ticker']=='USDPHP')]
 
 Graph1storage = {}  # to store
 timer_start = time.time()
@@ -195,14 +199,14 @@ timer_start = time.time()
 num = 0
 
 for key, value in Graph1.groupby(
-        ['NDF_Pair']):  # seperate dataframes by column value using group by, the col being groupby becomes key
+        ['Ticker']):  # seperate dataframes by column value using group by, the col being groupby becomes key
 
     Graph1storage[key] = value  # store dataframes in dict
 
     # Linegraph
     # Data
-    x = value['ValueTime'].values
-    y = value['Fwd_Fwd_pip'].values
+    x = value['ValueDate'].values
+    y = value['RollingBps'].values
 
     # Reset setting everytime
     mpl.rcParams.update(mpl.rcParamsDefault)
@@ -244,7 +248,7 @@ for key, value in Graph1.groupby(
 
     # Add axis names
     plt.xlabel('Date')
-    plt.ylabel('IMM Pip Spread')
+    plt.ylabel('IMM Bps Spread')
 
     # Get Max and Min value and get in titles
     xmax = x[np.argmax(y)]
@@ -262,14 +266,306 @@ for key, value in Graph1.groupby(
     # Add Title and subtitle
     plt.title("Rolling Spread  of {0} between 1st and 2nd IMM across time".format(key)
               + "\nThe report took {0} seconds to be generated.".format(speed)
-              + "\nMax: {:1,.0f} pips on {}".format(ymax, xmax)
-              + "\nMin: {:1,.0f} pips on {}".format(ymin, xmin)
+              + "\nMax: {:1,.0f} bps on {}".format(ymax, xmax)
+              + "\nMin: {:1,.0f} bps on {}".format(ymin, xmin)
               , loc='left', fontsize=12, fontweight=0, color='green', fontstyle='italic')  # Add title to the plot
     plt.suptitle(key, fontsize=18)
 
-    plt.savefig(my_path + '/output/RollingPoint/' + key + '.png')
+    plt.savefig(my_path + '/RollingPoint/' + key + '.png')
     plt.clf()  # to clean the memory
     plt.cla()
     plt.close()
 
     num = num + 10  # counter to change color
+##
+    # Graph2: to plot the PnL_by_IMM graphs using FacetGrid
+    Graph2 = final_bmk_result[['Ticker', 'FSDate1', 'LD_to_Roll', 'Cum_Pos_PnL']].dropna()  # will segment later.
+
+    # Graph2=Graph2[Graph2['Ticker']=='USDTWD'] #testmode
+    Graph2['FSDate1'] = Graph2['FSDate1'].map(lambda x: x.strftime('%b%y'))
+
+    # Generates Graph just IMM by current
+    Graph2storage = {}  # to store
+    timer_start = time.time()
+
+    for key, value in Graph2.groupby(
+            ['Ticker']):  # seperate dataframes by column value using group by, the col being groupby becomes key
+
+        Graph2storage[key] = value  # store dataframes in dict
+
+        # https://python-graph-gallery.com/242-area-chart-and-faceting/
+        # https://seaborn.pydata.org/generated/seaborn.FacetGrid.html
+
+        # Reset setting everytime
+        mpl.rcParams.update(mpl.rcParamsDefault)
+        sns.set()  # seaborn style
+        g = sns.FacetGrid(Graph2storage[key], col='FSDate1', hue='FSDate1', col_wrap=8, sharex=False, sharey=False)
+        # Create a grid : initialize it
+        g = g.map(plt.plot, 'LD_to_Roll', 'Cum_Pos_PnL')  # Add the line over the area with the plot function
+        g = g.map(plt.fill_between, 'LD_to_Roll', 'Cum_Pos_PnL', alpha=0.2)  # Fill the area with fill_between
+        g = g.set_titles("{col_name}")  # Set Tile for each Grid
+        g = g.set(xlim=(Graph2storage[key]['LD_to_Roll'].max(), 0))  # Desecending order
+
+        # loop each grid to format
+        for ax in g.axes[:]:
+            # format the ticks
+            # x-axis
+            ax.xaxis.set_minor_locator(plt.MultipleLocator(5))  # show at every interval of 1
+            ax.xaxis.set_major_locator(plt.MultipleLocator(10))  # show at every interval of 5
+
+            # y-axis
+            ax.yaxis.set_minor_locator(plt.MaxNLocator(5))
+            ax.yaxis.set_major_locator(plt.MaxNLocator(10))
+            # y-axis
+            ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: format(int(x), ',')))
+
+            # gridlines
+            ax.grid(which='major', color='black', linestyle='--', linewidth=0.5, alpha=0.5)
+            ax.grid(which='minor', color='black', linestyle='--', linewidth=0.5, alpha=0.1)
+
+            # Tick tailor made
+            ax.tick_params(direction='out', length=2, width=1, labelcolor='black', labelsize=9)
+
+        # Add suptitle
+        plt.subplots_adjust(top=0.92)  # not crash suptitle to subplot
+        now = time.time()
+        speed = int(now - timer_start)
+        g = g.fig.suptitle(key + " The report has taken {0} seconds to generate this report".format(speed), fontsize=12)
+        plt.savefig(my_path + '/PnL_by_IMM/' + key + '.png')
+        plt.clf()  # to clean the memory
+        plt.cla()
+        plt.close()
+
+##
+# Graph3: to plot the Day2Roll_PnL graphs
+
+Graph3_metadata = final_bmk_result[['Ticker', 'LD_to_Roll', 'Cum_Pos_PnL']]
+# Graph3_metadata=Graph3_metadata[(Graph3_metadata['Ticker']=='USDPHP')] #testmode
+
+# Groupby to form sum of every LD_to_roll in each FX Pair
+Graph3 = Graph3_metadata.groupby(['Ticker', 'LD_to_Roll'], as_index=True).sum().dropna()
+Graph3 = Graph3.reset_index(level=1).reset_index(level=0)  # so no index..
+
+graph3storage = {}  # to store
+
+timer_start = time.time()
+
+for key, value in Graph3.groupby(
+        ['Ticker']):  # seperate dataframes by column value using group by, the col being groupby becomes key
+
+    graph3storage[key] = value  # store dataframes in dict, e.g dict_ccy_rollingpt['USDTWD']
+
+    # lollipop
+    # Data
+    x = value['LD_to_Roll'].values
+    y = value['Cum_Pos_PnL'].values
+
+    my_color = np.where(y >= 0, 'blue', 'red')  # Color code of +ve and -ve groups
+
+    sns.set()  # seaborn style
+    fig, ax = plt.subplots(figsize=(20, 10), dpi=300)  # size of the plot
+
+    # Reset setting everytime
+    mpl.rcParams.update(mpl.rcParamsDefault)
+    # Style use
+    plt.style.use('seaborn-whitegrid')
+
+    # Chart Type use
+    plt.vlines(x=x, ymin=0, ymax=y, color=my_color, alpha=0.9, linewidth=1.9)  # Plot the verticle lines
+
+    # gridlines
+    ax.grid(which='major', color='black', linestyle='--', linewidth=1, alpha=0.5)
+    ax.grid(which='minor', color='black', linestyle='--', linewidth=0.5, alpha=0.1)
+
+    # Tick min and max
+    ax.set_xlim(x.min(), x.max() + 1)
+    plt.ylim(y.min() - abs(y.min()) / 20, y.max() + abs(y.max() / 20))
+
+    # format the ticks
+    # x-axis
+    ax.xaxis.set_minor_locator(plt.MultipleLocator(1))  # show at every interval of 1
+    ax.xaxis.set_major_locator(plt.MultipleLocator(5))  # show at every interval of 5
+
+    # y-axis
+    ax.yaxis.set_minor_locator(plt.MaxNLocator(20))
+    ax.yaxis.set_major_locator(plt.MaxNLocator(10))
+
+    # format the ticks
+    # y-axis
+    ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: format(int(x), ',')))
+
+    # Add axis names
+    plt.xlabel('Days-to-1st-IMM')
+    plt.ylabel('Cumulative PnL')
+
+    # Get Max and Min value and get in titles
+    xmax = x[np.argmax(y)]
+    ymax = y.max()
+    xmin = x[np.argmin(y)]
+    ymin = y.min()
+
+    # Timer on process
+    timer_end = time.time()
+    speed = int(timer_end - timer_start)
+
+    # Add Title and subtitle
+    plt.title("Cumulative firm-level PnL of {0} rolling on a given day before 1st IMM".format(key)
+              + "\nThe report took {0} seconds to be generated.".format(speed)
+              + "\nBest PnL: {:1,.0f} rolling constantly on {:d}th day from fix".format(ymax, xmax)
+              + "\nWorst PnL: {:1,.0f} rolling constantly on {:d}th day from fix".format(ymin, xmin)
+              , loc='left', fontsize=12, fontweight=0, color='green', fontstyle='italic')  # Add title to the plot
+    plt.suptitle(key, fontsize=18)
+
+    # Save and close for next loop
+    plt.savefig(my_path + '/Day2Roll_PnL/' + key + '.png')
+    plt.clf()  # to clean the memory
+    plt.cla()
+    plt.close()
+##
+# Graph4: to plot the Bmk_PnL_by_IMM graphs using FacetGrid
+Graph4 = final_bmk_result[['Ticker', 'FSDate1', 'LD_to_Roll', 'Cum_Bmk_PnL']].dropna()  # will segment later.
+
+# Graph4=Graph4[Graph4['NDF_Pair']=='USDTWD'] #testmode
+Graph4['FSDate1'] = Graph4['FSDate1'].map(lambda x: x.strftime('%b%y'))
+
+# Generates Graph just IMM by current
+Graph4storage = {}  # to store
+timer_start = time.time()
+
+for key, value in Graph4.groupby(
+        ['Ticker']):  # seperate dataframes by column value using group by, the col being groupby becomes key
+
+    Graph4storage[key] = value  # store dataframes in dict
+
+    # https://python-graph-gallery.com/242-area-chart-and-faceting/
+    # https://seaborn.pydata.org/generated/seaborn.FacetGrid.html
+
+    # Reset setting everytime
+    mpl.rcParams.update(mpl.rcParamsDefault)
+    sns.set()  # seaborn style
+    g = sns.FacetGrid(Graph4storage[key], col='FSDate1', hue='FSDate1', col_wrap=8, sharex=False, sharey=False)
+    # Create a grid : initialize it
+    g = g.map(plt.plot, 'LD_to_Roll', 'Cum_Bmk_PnL')  # Add the line over the area with the plot function
+    g = g.map(plt.fill_between, 'LD_to_Roll', 'Cum_Bmk_PnL', alpha=0.2)  # Fill the area with fill_between
+    g = g.set_titles("{col_name}")  # Set Tile for each Grid
+    g = g.set(xlim=(Graph2storage[key]['LD_to_Roll'].max(), 0))  # Desecending order
+
+    # loop each grid to format
+    for ax in g.axes[:]:
+        # format the ticks
+        # x-axis
+        ax.xaxis.set_minor_locator(plt.MultipleLocator(5))  # show at every interval of 1
+        ax.xaxis.set_major_locator(plt.MultipleLocator(10))  # show at every interval of 5
+
+        # y-axis
+        ax.yaxis.set_minor_locator(plt.MaxNLocator(5))
+        ax.yaxis.set_major_locator(plt.MaxNLocator(10))
+        # y-axis
+        ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: format(int(x), ',')))
+
+        # gridlines
+        ax.grid(which='major', color='black', linestyle='--', linewidth=0.5, alpha=0.5)
+        ax.grid(which='minor', color='black', linestyle='--', linewidth=0.5, alpha=0.1)
+
+        # Tick tailor made
+        ax.tick_params(direction='out', length=2, width=1, labelcolor='black', labelsize=9)
+
+    # Add suptitle
+    plt.subplots_adjust(top=0.92)  # not crash suptitle to subplot
+    now = time.time()
+    speed = int(now - timer_start)
+    g = g.fig.suptitle(key + " The report has taken {0} seconds to generate this report".format(speed), fontsize=12)
+    plt.savefig(my_path + '/Bmk_PnL_by_IMM/' + key + '.png')
+    plt.clf()  # to clean the memory
+    plt.cla()
+    plt.close()
+##
+# Graph5: to plot the Bmk_Day2Roll_PnL graphs
+
+Graph5_metadata = final_bmk_result[['Ticker', 'LD_to_Roll', 'Cum_Bmk_PnL']]
+# Graph5_metadata=Graph5_metadata[(Graph3_metadata['Ticker']=='USDPHP')] #testmode
+
+# Groupby to form sum of every LD_to_roll in each FX Pair
+Graph5 = Graph5_metadata.groupby(['Ticker', 'LD_to_Roll'], as_index=True).sum().dropna()
+Graph5 = Graph5.reset_index(level=1).reset_index(level=0)  # so no index..
+
+graph5storage = {}  # to store
+
+timer_start = time.time()
+
+for key, value in Graph5.groupby(
+        ['Ticker']):  # seperate dataframes by column value using group by, the col being groupby becomes key
+
+    graph5storage[key] = value  # store dataframes in dict, e.g dict_ccy_rollingpt['USDTWD']
+
+    # lollipop
+    # Data
+    x = value['LD_to_Roll'].values
+    y = value['Cum_Bmk_PnL'].values
+
+    my_color = np.where(y >= 0, 'blue', 'red')  # Color code of +ve and -ve groups
+
+    sns.set()  # seaborn style
+    fig, ax = plt.subplots(figsize=(20, 10), dpi=300)  # size of the plot
+
+    # Reset setting everytime
+    mpl.rcParams.update(mpl.rcParamsDefault)
+    # Style use
+    plt.style.use('seaborn-whitegrid')
+
+    # Chart Type use
+    plt.vlines(x=x, ymin=0, ymax=y, color=my_color, alpha=0.9, linewidth=1.9)  # Plot the verticle lines
+
+    # gridlines
+    ax.grid(which='major', color='black', linestyle='--', linewidth=1, alpha=0.5)
+    ax.grid(which='minor', color='black', linestyle='--', linewidth=0.5, alpha=0.1)
+
+    # Tick min and max
+    ax.set_xlim(x.min(), x.max() + 1)
+    plt.ylim(y.min() - abs(y.min()) / 20, y.max() + abs(y.max() / 20))
+
+    # format the ticks
+    # x-axis
+    ax.xaxis.set_minor_locator(plt.MultipleLocator(1))  # show at every interval of 1
+    ax.xaxis.set_major_locator(plt.MultipleLocator(5))  # show at every interval of 5
+
+    # y-axis
+    ax.yaxis.set_minor_locator(plt.MaxNLocator(20))
+    ax.yaxis.set_major_locator(plt.MaxNLocator(10))
+
+    # format the ticks
+    # y-axis
+    ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: format(int(x), ',')))
+
+    # Add axis names
+    plt.xlabel('Days-to-1st-IMM')
+    plt.ylabel('Cumulative PnL vs Benchmark (14D from 1st IMM)')
+
+    # Get Max and Min value and get in titles
+    xmax = x[np.argmax(y)]
+    ymax = y.max()
+    xmin = x[np.argmin(y)]
+    ymin = y.min()
+
+    # Timer on process
+    timer_end = time.time()
+    speed = int(timer_end - timer_start)
+
+    # Add Title and subtitle
+    plt.title(
+        "Cumulative firm-level PnL (adjusted by Bmk(14d) PnL of {0} rolling on a given day before 1st IMM".format(
+            key)
+        + "\nThe report took {0} seconds to be generated.".format(speed)
+        + "\nBest PnL: {:1,.0f} rolling constantly on {:d}th day from fix".format(ymax, xmax)
+        + "\nWorst PnL: {:1,.0f} rolling constantly on {:d}th day from fix".format(ymin, xmin)
+        , loc='left', fontsize=12, fontweight=0, color='green', fontstyle='italic')  # Add title to the plot
+    plt.suptitle(key, fontsize=18)
+
+    # Save and close for next loop
+    plt.savefig(my_path + '/Bmk_Day2Roll_PnL/' + key + '.png')
+    plt.clf()  # to clean the memory
+    plt.cla()
+    plt.close()
+##
+##
+
